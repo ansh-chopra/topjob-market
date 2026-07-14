@@ -259,19 +259,24 @@ audio { width: 100%; margin-top: 16px; }
 
 <section class="hero">
   <div class="frame">
-    <div class="eyebrow mono">FIELD NOTE 01 · THE MARKETPLACE</div>
-    <h1>Get paid for <span class="ghost">your voice.</span></h1>
-    <p>Top Job matches you with paid recording tasks and open roles.
-       Record in your browser, submit, get paid through Stripe.
-       Consent-first and revocable — always.</p>
+    <div class="eyebrow mono">TOP JOB · BY ZERO BILLION</div>
+    <h1>The talent <span class="ghost">marketplace.</span></h1>
+    <p>Freelance gigs, paid studies, and full-time roles — matched to you.
+       Voice actors unlock paid recording tasks on top.
+       Paid through Stripe. Consent-first and revocable — always.</p>
     <div class="cta-row">
-      <a class="pill" href="#gate">See paid tasks →</a>
-      <a class="pill ghost" href="#roles">Open roles</a>
+      <a class="pill" href="#roles">Browse open roles →</a>
+      <a class="pill ghost" href="#gate">Paid voice tasks</a>
     </div>
   </div>
 </section>
 
 <div class="tape mono" aria-hidden="true" id="tape"></div>
+
+<section id="roles">
+  <div class="strip"><span>SEC. 01</span><span>OPEN ROLES</span></div>
+  <div class="ledger" id="job-ledger"><div class="ledger-empty">Loading the ledger…</div></div>
+</section>
 
 <section class="gate" id="gate">
   <div class="frame">
@@ -291,17 +296,12 @@ audio { width: 100%; margin-top: 16px; }
 </section>
 
 <section id="tasks-section" class="locked">
-  <div class="strip"><span>SEC. 01</span><span>PAID RECORDING TASKS</span></div>
+  <div class="strip"><span>SEC. 02</span><span>PAID RECORDING TASKS</span></div>
   <div class="locked-note">
     Paid recording tasks are reserved for voice-ready profiles.
     <button data-gate="yes">I do voice work — unlock them</button>
   </div>
   <div class="ledger" id="task-ledger"><div class="ledger-empty">Loading the ledger…</div></div>
-</section>
-
-<section id="roles">
-  <div class="strip"><span>SEC. 02</span><span>OPEN ROLES</span></div>
-  <div class="ledger" id="job-ledger"><div class="ledger-empty">Loading the ledger…</div></div>
 </section>
 
 <div class="band">
@@ -447,7 +447,7 @@ async function loadData() {
     $("stat-count").textContent = ALL.length;
     $("stat-top").textContent = "$" + Math.max(0, ...ALL.map((o) => o.pay_max ?? o.pay_min ?? 0));
     $("tape").innerHTML = [...new Set(
-      data.tasks.map((t) => t.title.split("—")[0].trim().toUpperCase()).filter(Boolean),
+      [...data.jobs, ...data.tasks].map((t) => t.title.split("—")[0].trim().toUpperCase()).filter(Boolean),
     )].slice(0, 12).map((t) => "<span>" + esc(t) + " ·</span>").join(" ");
     document.querySelectorAll(".row").forEach((row) =>
       row.addEventListener("click", () => {
