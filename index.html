@@ -1,362 +1,384 @@
 <!doctype html>
 <!--
-  Top Job web marketplace (source of truth — the deployed copy is a push away).
+  Top Job web app (source of truth — the deployed copy is a push away).
 
   Hosting: GitHub Pages repo `ansh-chopra/topjob-market` (public), served at
   https://ansh-chopra.github.io/topjob-market/. Deploy = copy this file to that
   repo as index.html and push. It cannot live on Supabase: the gateway forces
-  text/plain + a sandbox CSP onto HTML from *.supabase.co/functions/v1
-  (anti-phishing), which also neutralized the applicants dashboard.
+  text/plain + a sandbox CSP onto HTML from *.supabase.co/functions/v1.
 
-  Data: GET functions/v1/market?json omitted (CORS-open JSON API, service-role
-  read of live opportunities). Writes: supabase-js in the browser with the
-  publishable key — same RLS paths as the iOS app (opt_in_to_opportunity RPC,
-  task-audio/task-photos uploads, task_submissions insert, profiles patch).
-  Payout onboarding proxies through POST market?onboard=1 because
-  stripe-connect has no CORS handling.
+  Design: replica of the native app's Opportunities feed (see
+  store-screenshots/01-hook.png and DESIGN.md palette) — off-white canvas,
+  green600 CTAs, white rounded cards, filter chips, bottom tab bar — framed as
+  "an AI that helps you earn money" (the app's AIWorkingState banner, live).
+
+  Data: GET functions/v1/market (CORS-open JSON API, service-role read of live
+  opportunities). Writes: supabase-js in the browser with the publishable key —
+  same RLS paths as the iOS app (opt_in_to_opportunity RPC, task-audio/
+  task-photos uploads, task_submissions insert, profiles patch). Payout
+  onboarding proxies through POST market?onboard=1 (stripe-connect has no CORS).
 
   Voice gate (product rule): paid task_kind listings stay hidden until the
-  visitor says they do voice work — localStorage tj.voice, mirrored into
+  person says they do voice work — localStorage tj.voice, mirrored into
   profiles.draft.voiceComfort after sign-in so the iOS app's likesVoiceWork()
   agrees.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Top Job — Talent Marketplace</title>
-<meta name="description" content="Paid recording tasks and open roles. Consent-first, revocable, paid via Stripe.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23111214'/%3E%3Ccircle cx='16' cy='13' r='5' fill='white'/%3E%3Crect x='14.5' y='18' width='3' height='7' fill='white'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Top Job — An AI that helps you earn money</title>
+<meta name="description" content="An AI that helps you earn money — matched gigs, paid studies, open roles, and paid recording tasks. Paid via Stripe.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2300C853'/%3E%3Ctext x='16' y='22' font-family='-apple-system,Helvetica' font-size='16' font-weight='800' text-anchor='middle' fill='white'%3E%24%3C/text%3E%3C/svg%3E">
 <style>
 :root {
-  --paper: #FFFFFF;
-  --ink: #111214;
-  --grey: #55585E;
-  --muted: #9BA1AB;
-  --hairline: #E6E7EA;
-  --recessed: #F5F5F6;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-  --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --display: "Anton", "Arial Narrow", var(--body);
+  --green500: #00E676;
+  --green600: #00C853;
+  --green700: #00A344;
+  --green100: #CDF6DE;
+  --green50: #EDFBF3;
+  --ink900: #17181A;
+  --ink600: #5B616B;
+  --ink400: #9BA1AB;
+  --ink200: #E5E7EB;
+  --ink100: #F1F2F4;
+  --offwhite: #F9F9F9;
+  --white: #FFFFFF;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --shadow: 0 6px 24px rgba(23, 24, 26, .07);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
   * { animation: none !important; transition: none !important; }
 }
+html, body { height: 100%; }
 body {
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--body);
+  background: #EDEEF0;
+  color: var(--ink900);
+  font-family: var(--font);
   font-size: 16px;
-  line-height: 1.55;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
-a { color: inherit; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
-button:disabled { cursor: default; }
-:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+button:disabled { cursor: default; opacity: .45; }
+:focus-visible { outline: 2px solid var(--ink900); outline-offset: 2px; }
 
-.mono { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-
-/* ── chrome strips ── */
-.bar {
-  background: var(--ink); color: var(--paper);
-  display: flex; justify-content: space-between; align-items: center; gap: 16px;
-  padding: 14px 24px;
-  font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
-}
-.bar a { text-decoration: none; }
-.bar a:hover { text-decoration: underline; }
-.dot {
-  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--paper); margin-right: 7px; vertical-align: 1px;
-  animation: pulse 2.4s ease-in-out infinite;
-}
-@keyframes pulse { 50% { opacity: .35; } }
-
-.frame { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-
-/* ── hero ── */
-.hero { border-bottom: 1px solid var(--hairline); padding: 72px 0 56px; }
-.eyebrow { color: var(--grey); margin-bottom: 24px; }
-h1 {
-  font-family: var(--display); font-weight: 400;
-  font-size: clamp(52px, 9.5vw, 118px);
-  line-height: .96; letter-spacing: .01em; text-transform: uppercase;
-  max-width: 11ch;
-}
-h1 .ghost { color: var(--muted); }
-.hero p { max-width: 46ch; color: var(--grey); margin: 28px 0 32px; font-size: 17px; }
-.cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
-.pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 13px 22px; border-radius: 999px;
-  background: var(--ink); color: var(--paper);
-  font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
-  text-decoration: none; border: 1px solid var(--ink);
-  transition: background .15s, color .15s;
-}
-.pill:hover { background: var(--paper); color: var(--ink); }
-.pill.ghost { background: var(--paper); color: var(--ink); border-color: var(--hairline); }
-.pill.ghost:hover { border-color: var(--ink); }
-.pill:disabled { opacity: .4; }
-
-/* ── tape ── */
-.tape {
-  border-bottom: 1px solid var(--hairline);
-  padding: 12px 24px; white-space: nowrap; overflow: hidden;
-  color: var(--muted);
-}
-.tape span { margin-right: 8px; }
-
-/* ── section strips ── */
-.strip {
-  display: flex; justify-content: space-between;
-  border-bottom: 1px solid var(--hairline);
-  padding: 10px 24px; color: var(--muted);
-  font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+/* ── phone column ── */
+.app {
+  max-width: 448px; margin: 0 auto; min-height: 100dvh;
+  background: var(--offwhite);
+  box-shadow: 0 0 0 1px var(--ink200);
+  padding: 18px 18px calc(84px + env(safe-area-inset-bottom));
+  position: relative;
 }
 
-/* ── gate ── */
-.gate { background: var(--recessed); border-bottom: 1px solid var(--hairline); padding: 56px 0; }
-.gate h2 {
-  font-family: var(--display); font-weight: 400; text-transform: uppercase;
-  font-size: clamp(34px, 5.5vw, 64px); line-height: 1; letter-spacing: .01em;
-  margin: 18px 0 10px;
+/* ── top bar ── */
+.topbar { display: flex; align-items: center; gap: 12px; padding: 6px 0 14px; }
+.avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--green100); color: var(--green700);
+  font-weight: 700; font-size: 15px;
+  display: flex; align-items: center; justify-content: center;
 }
-.gate p { color: var(--grey); max-width: 44ch; margin-bottom: 26px; }
-.gate-answered { display: none; align-items: center; gap: 14px; flex-wrap: wrap; }
-.gate-answered .undo { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--grey); background: none; border: 0; text-decoration: underline; cursor: pointer; }
-
-/* ── ledger ── */
-.ledger { border-bottom: 1px solid var(--hairline); }
-.row {
-  display: grid; width: 100%; text-align: left; align-items: baseline;
-  grid-template-columns: 64px 1fr minmax(0,.5fr) 100px 110px 56px;
-  gap: 16px; padding: 20px 24px;
-  border-bottom: 1px solid var(--hairline);
-  transition: background .12s, color .12s;
+.paychip {
+  background: var(--green100); color: var(--green700);
+  font-weight: 700; font-size: 15px;
+  padding: 8px 16px; border-radius: 999px;
 }
-.row:last-child { border-bottom: 0; }
-.row:not(:disabled):hover { background: var(--ink); color: var(--paper); }
-.row:not(:disabled):hover .row-code,
-.row:not(:disabled):hover .row-org,
-.row:not(:disabled):hover .row-pay,
-.row:not(:disabled):hover .row-time { color: var(--paper); opacity: .75; }
-.row-code, .row-pay, .row-time, .row-cta { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; }
-.row-code { color: var(--muted); }
-.row-title { font-weight: 600; font-size: 16px; }
-.row-org { color: var(--muted); font-size: 13px; }
-.row-pay { color: var(--ink); }
-.row-time { color: var(--muted); }
-.row-cta { text-align: right; }
-.row:disabled .row-title { color: var(--muted); }
-.ledger-empty { padding: 32px 24px; color: var(--muted); }
-#tasks-section.locked .ledger, #tasks-section.locked .strip { display: none; }
-.locked-note { display: none; padding: 26px 24px; color: var(--grey); border-bottom: 1px solid var(--hairline); }
-#tasks-section.locked .locked-note { display: block; }
-.locked-note button { text-decoration: underline; font-weight: 600; }
+.topbar .spacer { flex: 1; }
 
-/* ── stats band ── */
-.band { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); border-bottom: 1px solid var(--hairline); }
-.band > div { padding: 28px 24px; border-right: 1px solid var(--hairline); }
-.band > div:last-child { border-right: 0; }
-.band strong { font-family: var(--display); font-weight: 400; font-size: 40px; line-height: 1.1; display: block; letter-spacing: .01em; }
-.band span { color: var(--muted); }
+.screen-title { font-size: 34px; line-height: 1.15; font-weight: 800; letter-spacing: -.5px; margin: 2px 0 14px; }
 
-/* ── modal ── */
+/* ── banners (AI + voice gate) ── */
+.banner {
+  background: var(--green50); border: 1px solid rgba(0, 200, 83, .18);
+  border-radius: 18px; padding: 14px; margin-bottom: 12px;
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.banner .tile {
+  width: 40px; height: 40px; border-radius: 12px; background: var(--white);
+  border: 1px solid rgba(0, 200, 83, .18); flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--green700);
+}
+.banner .copy { flex: 1; min-width: 0; }
+.banner h3 { font-size: 16px; font-weight: 700; }
+.banner p { font-size: 13px; color: var(--ink600); margin-top: 2px; }
+.banner .status {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
+  color: var(--green700); font-weight: 700; display: flex; align-items: center; gap: 6px;
+  margin-bottom: 3px; text-transform: uppercase;
+}
+.status .dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--green500);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: .3; } }
+#ai-line { transition: opacity .4s; }
+.banner .actions { display: flex; gap: 8px; margin-top: 10px; }
+.chipbtn {
+  padding: 8px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  background: var(--green600); color: var(--white);
+}
+.chipbtn.ghost { background: var(--white); color: var(--ink900); border: 1px solid var(--ink200); }
+
+/* ── filter chips ── */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+.chip {
+  padding: 9px 18px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  background: var(--white); color: var(--ink900); border: 1px solid var(--ink200);
+}
+.chip.on { background: var(--ink900); color: var(--white); border-color: var(--ink900); }
+.count { font-size: 13px; color: var(--ink400); margin-bottom: 12px; }
+.voice-note { font-size: 13px; color: var(--ink600); margin: -4px 0 12px; }
+.voice-note button { color: var(--green700); font-weight: 600; text-decoration: underline; font-size: 13px; }
+
+/* ── cards ── */
+.card {
+  background: var(--white); border-radius: 20px; padding: 16px;
+  box-shadow: var(--shadow); border: 1px solid rgba(23, 24, 26, .05);
+  margin-bottom: 14px; width: 100%; text-align: left; display: block;
+}
+.card:active { transform: scale(.995); }
+.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.orgmark {
+  width: 42px; height: 42px; border-radius: 12px; background: var(--ink900);
+  color: var(--white); font-weight: 800; font-size: 17px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.card-org { flex: 1; min-width: 0; }
+.card-org b { font-size: 15px; display: block; }
+.card-org span { font-size: 13px; color: var(--ink600); }
+.pill-badge {
+  background: var(--green100); color: var(--green700);
+  font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 999px; flex: none;
+}
+.card-title { font-size: 21px; font-weight: 700; letter-spacing: -.2px; margin-bottom: 8px; }
+.meta { font-size: 13px; color: var(--ink600); display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.meta svg { vertical-align: -2px; margin-right: 3px; }
+.meta .sep { color: var(--ink400); }
+.card hr { border: 0; border-top: 1px solid var(--ink100); margin: 13px 0; }
+.pay-row { display: flex; align-items: center; gap: 8px; }
+.pay { font-size: 24px; font-weight: 800; color: var(--green600); letter-spacing: -.3px; }
+.pay-unit { font-size: 14px; color: var(--ink600); flex: 1; }
+.apply {
+  background: var(--green600); color: var(--white); font-size: 15px; font-weight: 700;
+  padding: 11px 26px; border-radius: 999px;
+}
+.apply:active { background: var(--green700); }
+.empty { color: var(--ink400); font-size: 14px; text-align: center; padding: 28px 0; }
+.skeleton { height: 150px; border-radius: 20px; background: var(--ink100); margin-bottom: 14px; animation: pulse 1.4s ease-in-out infinite; }
+
+/* ── tab bar ── */
+.tabbar {
+  position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 448px; z-index: 40;
+  background: rgba(255, 255, 255, .92); backdrop-filter: blur(14px);
+  border-top: 1px solid var(--ink200);
+  display: flex; padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+}
+.tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--ink400); font-size: 10px; font-weight: 600; }
+.tab.on { color: var(--green600); }
+
+/* ── sheets ── */
 .overlay {
-  position: fixed; inset: 0; background: rgba(17,18,20,.5);
+  position: fixed; inset: 0; background: rgba(23, 24, 26, .45);
   display: none; align-items: flex-end; justify-content: center; z-index: 50;
 }
 .overlay.open { display: flex; }
-/* The sign-in sheet stacks over the task sheet (requireAuth opens it mid-task);
-   with equal z-index, DOM order would hide it underneath. */
 #auth-overlay { z-index: 60; }
 .sheet {
-  background: var(--paper); width: 100%; max-width: 560px;
-  max-height: 92vh; overflow-y: auto;
-  border: 1px solid var(--hairline); border-radius: 16px 16px 0 0;
-  padding: 0 0 28px;
+  background: var(--white); width: 100%; max-width: 448px;
+  max-height: 92dvh; overflow-y: auto;
+  border-radius: 24px 24px 0 0;
+  padding: 10px 20px calc(24px + env(safe-area-inset-bottom));
 }
 @media (min-width: 640px) {
-  .overlay { align-items: center; }
-  .sheet { border-radius: 16px; }
+  .overlay { align-items: center; padding: 20px; }
+  .sheet { border-radius: 24px; }
 }
-.sheet-head {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 20px; border-bottom: 1px solid var(--hairline);
-  position: sticky; top: 0; background: var(--paper);
+.grabber { width: 40px; height: 5px; border-radius: 3px; background: var(--ink200); margin: 4px auto 12px; }
+.sheet-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.sheet-kind { font-size: 12px; font-weight: 700; color: var(--ink400); letter-spacing: .06em; text-transform: uppercase; }
+.xbtn { width: 32px; height: 32px; border-radius: 50%; background: var(--ink100); font-size: 14px; display: flex; align-items: center; justify-content: center; }
+.sheet h3 { font-size: 24px; font-weight: 800; letter-spacing: -.3px; line-height: 1.2; }
+.sheet .sub { color: var(--ink600); font-size: 15px; margin-top: 8px; }
+.statcard {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  background: var(--offwhite); border-radius: 16px; padding: 14px; margin-top: 14px;
 }
-.sheet-body { padding: 24px 20px 0; }
-.sheet h3 { font-size: 22px; line-height: 1.25; letter-spacing: -.01em; }
-.sheet .sub { color: var(--grey); margin-top: 6px; }
-.sheet label { display: block; margin: 18px 0 6px; font-weight: 600; font-size: 14px; }
+.statcard div { text-align: left; }
+.statcard label { font-size: 11px; font-weight: 700; color: var(--ink400); text-transform: uppercase; letter-spacing: .05em; display: block; }
+.statcard b { font-size: 19px; font-weight: 800; }
+.statcard .green { color: var(--green600); }
+.sheet .err {
+  background: #FEE2E2; color: #991B1B; border-radius: 12px; padding: 10px 12px;
+  margin-top: 12px; font-size: 14px; display: none;
+}
+.sheet .err.show { display: block; }
+.btn {
+  width: 100%; background: var(--green600); color: var(--white);
+  font-size: 17px; font-weight: 700; padding: 15px; border-radius: 999px; margin-top: 12px;
+}
+.btn:active { background: var(--green700); }
+.btn.ghost { background: var(--green50); color: var(--green700); }
+.btn.plain { background: var(--ink100); color: var(--ink900); }
+.sheet label.field { display: block; font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
 .sheet input[type="email"], .sheet input[type="text"] {
-  width: 100%; padding: 13px 14px; font-size: 16px;
-  border: 1px solid var(--hairline); border-radius: 10px; font-family: inherit;
+  width: 100%; padding: 14px; font-size: 17px; font-family: inherit;
+  border: 1px solid var(--ink200); border-radius: 14px; background: var(--white);
 }
-.sheet input:focus { outline: 2px solid var(--ink); outline-offset: 0; border-color: var(--ink); }
-.sheet .code-input { font-family: var(--mono); letter-spacing: .35em; text-align: center; font-size: 22px; }
-.sheet .actions { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
-.err { color: var(--ink); background: var(--recessed); border: 1px solid var(--hairline); border-radius: 10px; padding: 10px 12px; margin-top: 14px; font-size: 14px; display: none; }
-.err.show { display: block; }
+.sheet input:focus { outline: 2px solid var(--green600); border-color: var(--green600); }
+.code-input { font-family: var(--mono); letter-spacing: .4em; text-align: center; font-size: 24px; }
 
 /* ── recorder ── */
-.rec-wrap { text-align: center; padding: 8px 0 4px; }
+.rec-wrap { text-align: center; padding: 10px 0 0; }
 .timer {
-  font-family: var(--mono); font-size: 56px; line-height: 1.1;
-  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  font-family: var(--mono); font-size: 52px; font-weight: 700; line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
-.timer-sub { color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin-top: 4px; }
+.timer-sub { font-size: 12px; font-weight: 700; color: var(--ink400); text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
 .rec-badge {
-  display: none; margin: 0 auto 14px; width: fit-content;
-  align-items: center; gap: 8px; padding: 5px 14px; border-radius: 999px;
-  background: var(--recessed); font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+  display: none; margin: 0 auto 12px; width: fit-content;
+  align-items: center; gap: 7px; padding: 6px 14px; border-radius: 999px;
+  background: var(--ink100); font-size: 12px; font-weight: 700; letter-spacing: .08em;
 }
 .rec-badge.on { display: flex; }
-.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink); animation: pulse 1.2s ease-in-out infinite; }
-.rec-badge.paused .rec-dot { animation: none; opacity: .35; }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: #EF4444; animation: pulse 1.2s ease-in-out infinite; }
+.rec-badge.paused .rec-dot { animation: none; background: var(--ink400); }
 .prompt-card {
-  border: 1px solid var(--hairline); border-radius: 14px; padding: 20px;
-  margin: 18px 0; text-align: center; display: none;
+  border: 1px solid var(--ink200); border-radius: 18px; padding: 18px;
+  margin: 16px 0 4px; text-align: center; display: none; background: var(--white);
+  box-shadow: var(--shadow);
 }
 .prompt-card.on { display: block; }
-.prompt-card img { max-width: 100%; border-radius: 10px; margin-bottom: 12px; }
-.prompt-counter { color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; margin-bottom: 10px; text-transform: uppercase; }
-.prompt-text { font-size: 24px; font-weight: 700; line-height: 1.3; }
-.prompt-hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
-audio { width: 100%; margin-top: 16px; }
+.prompt-card img { max-width: 100%; border-radius: 12px; margin-bottom: 10px; }
+.prompt-counter { font-size: 11px; font-weight: 700; color: var(--ink400); letter-spacing: .06em; margin-bottom: 8px; text-transform: uppercase; }
+.prompt-text { font-size: 22px; font-weight: 800; line-height: 1.3; letter-spacing: -.2px; }
+.prompt-hint { color: var(--ink400); font-size: 13px; margin-top: 8px; }
+audio { width: 100%; margin-top: 14px; }
 .toast {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-  background: var(--ink); color: var(--paper); padding: 12px 20px; border-radius: 999px;
-  font-family: var(--mono); font-size: 12px; letter-spacing: .06em;
-  display: none; z-index: 90; max-width: 90vw; text-align: center;
+  position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  background: var(--ink900); color: var(--white); padding: 12px 20px; border-radius: 999px;
+  font-size: 14px; font-weight: 600; display: none; z-index: 90; max-width: 90vw; text-align: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,.25);
 }
 .toast.show { display: block; }
-
-@media (max-width: 720px) {
-  .row { grid-template-columns: 48px 1fr 72px; }
-  .row-org, .row-time, .row-cta { display: none; }
-  .row-pay { text-align: right; }
-  .bar { padding: 12px 16px; }
-  .frame { padding: 0 16px; }
-}
+.foot { text-align: center; font-size: 12px; color: var(--ink400); padding: 18px 0 6px; }
+.foot a { color: var(--ink600); }
 </style>
 </head>
 <body>
 
-<header class="bar">
-  <span>ZERO BILLION · TOP JOB</span>
-  <span><span class="dot" aria-hidden="true"></span>MARKETPLACE · OPERATING</span>
-  <button id="session-chip" class="mono" style="color:inherit">SIGN IN</button>
-</header>
+<div class="app">
+  <div class="topbar">
+    <button class="avatar" id="avatar" aria-label="Profile">👤</button>
+    <button class="paychip" id="balance" aria-label="Earnings balance">$0.00</button>
+    <span class="spacer"></span>
+  </div>
 
-<section class="hero">
-  <div class="frame">
-    <div class="eyebrow mono">TOP JOB · BY ZERO BILLION</div>
-    <h1>The talent <span class="ghost">marketplace.</span></h1>
-    <p>Freelance gigs, paid studies, and full-time roles — matched to you.
-       Voice actors unlock paid recording tasks on top.
-       Paid through Stripe. Consent-first and revocable — always.</p>
-    <div class="cta-row">
-      <a class="pill" href="#roles">Browse open roles →</a>
-      <a class="pill ghost" href="#gate">Paid voice tasks</a>
+  <h1 class="screen-title">Opportunities</h1>
+
+  <div class="banner" aria-live="off">
+    <div class="tile" aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l1.7 4.6L18 9.2l-4.3 1.6L12 15.5l-1.7-4.7L6 9.2l4.3-1.6L12 3z" fill="currentColor" stroke="none"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14z" fill="currentColor" stroke="none"/></svg>
+    </div>
+    <div class="copy">
+      <div class="status"><span class="dot"></span>SEARCHING NOW</div>
+      <h3>Your AI is working for you</h3>
+      <p id="ai-line">Scanning every new opportunity against your profile.</p>
     </div>
   </div>
-</section>
 
-<div class="tape mono" aria-hidden="true" id="tape"></div>
-
-<section id="roles">
-  <div class="strip"><span>SEC. 01</span><span>OPEN ROLES</span></div>
-  <div class="ledger" id="job-ledger"><div class="ledger-empty">Loading the ledger…</div></div>
-</section>
-
-<section class="gate" id="gate">
-  <div class="frame">
-    <div class="mono" style="color:var(--muted)">ACCESS · PAID TASKS</div>
-    <h2>Are you a voice actor?</h2>
-    <p>Recording tasks pay per take and need people who like mic work —
-       narration, accents, character reads, or just a clear everyday voice.</p>
-    <div class="cta-row" id="gate-buttons">
-      <button class="pill" data-gate="yes">Yes — show me paid tasks</button>
-      <button class="pill ghost" data-gate="no">Not my thing</button>
+  <div class="banner" id="gate-banner" style="display:none">
+    <div class="tile" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0h-2a5 5 0 0 1-10 0H5z"/><rect x="11" y="18" width="2" height="4"/></svg>
     </div>
-    <div class="gate-answered" id="gate-answered">
-      <span class="mono" id="gate-verdict"></span>
-      <button class="undo" id="gate-undo">Change answer</button>
+    <div class="copy">
+      <h3>Are you a voice actor?</h3>
+      <p>Paid recording tasks unlock for people who like mic work — narration, accents, or a clear everyday voice.</p>
+      <div class="actions">
+        <button class="chipbtn" data-gate="yes">Yes, I am</button>
+        <button class="chipbtn ghost" data-gate="no">Not me</button>
+      </div>
     </div>
   </div>
-</section>
 
-<section id="tasks-section" class="locked">
-  <div class="strip"><span>SEC. 02</span><span>PAID RECORDING TASKS</span></div>
-  <div class="locked-note">
-    Paid recording tasks are reserved for voice-ready profiles.
-    <button data-gate="yes">I do voice work — unlock them</button>
+  <div class="chips" id="chips"></div>
+  <div class="voice-note" id="voice-note" style="display:none"></div>
+  <div class="count" id="count"></div>
+
+  <div id="feed">
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
   </div>
-  <div class="ledger" id="task-ledger"><div class="ledger-empty">Loading the ledger…</div></div>
-</section>
 
-<div class="band">
-  <div><strong id="stat-count">—</strong><span class="mono">LIVE LISTINGS</span></div>
-  <div><strong id="stat-top">—</strong><span class="mono">TOP RATE</span></div>
-  <div><strong>STRIPE</strong><span class="mono">PAYOUT RAILS, FROM DAY ONE</span></div>
+  <div class="foot">Paid via Stripe · consent-first · <a href="https://zerobillion.ai">Zero Billion</a></div>
 </div>
 
-<footer class="bar">
-  <span>CONSENT-FIRST · REVOCABLE · PAID VIA STRIPE</span>
-  <a href="https://zerobillion.ai">ZEROBILLION.AI</a>
-  <span>© 2026 ZERO BILLION AI</span>
-</footer>
+<nav class="tabbar">
+  <button class="tab on" data-tab="opportunities">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M9 5V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1h3a2 2 0 0 1 2 2v3H4V7a2 2 0 0 1 2-2h3zm2 0h2V4h-2v1zM4 12h16v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6zm7 1v2h2v-2h-2z"/></svg>
+    Opportunities
+  </button>
+  <button class="tab" data-tab="Activity">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2" stroke-linecap="round"/></svg>
+    Activity
+  </button>
+  <button class="tab" data-tab="Messages">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z" stroke-linejoin="round"/></svg>
+    Messages
+  </button>
+  <button class="tab" data-tab="Earnings">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><text x="12" y="16.5" font-size="12" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">$</text></svg>
+    Earnings
+  </button>
+  <button class="tab" data-tab="Profile">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0" stroke-linecap="round"/></svg>
+    Profile
+  </button>
+</nav>
 
 <!-- auth sheet -->
 <div class="overlay" id="auth-overlay" role="dialog" aria-modal="true" aria-label="Sign in">
   <div class="sheet">
-    <div class="sheet-head">
-      <span class="mono">SIGN IN</span>
-      <button data-close="auth-overlay" aria-label="Close">✕</button>
+    <div class="grabber"></div>
+    <div class="sheet-top">
+      <span class="sheet-kind">Sign in</span>
+      <button class="xbtn" data-close="auth-overlay" aria-label="Close">✕</button>
     </div>
-    <div class="sheet-body">
-      <div id="auth-step-email">
-        <h3>Sign in with your email</h3>
-        <p class="sub">We'll send a 6-digit code. No password needed.</p>
-        <label for="auth-email">Email</label>
-        <input type="email" id="auth-email" autocomplete="email" placeholder="you@example.com">
-        <div class="err" id="auth-err"></div>
-        <div class="actions">
-          <button class="pill" id="send-code">Send code</button>
-        </div>
-      </div>
-      <div id="auth-step-code" style="display:none">
-        <h3>Enter the code</h3>
-        <p class="sub" id="code-sub"></p>
-        <label for="auth-code">6-digit code</label>
-        <input type="text" id="auth-code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
-        <div class="err" id="code-err"></div>
-        <div class="actions">
-          <button class="pill" id="verify-code">Verify</button>
-          <button class="pill ghost" id="back-to-email">Use another email</button>
-        </div>
-      </div>
+    <div id="auth-step-email">
+      <h3>Sign in with your email</h3>
+      <p class="sub">We'll send a 6-digit code. No password needed.</p>
+      <label class="field" for="auth-email">Email</label>
+      <input type="email" id="auth-email" autocomplete="email" placeholder="you@example.com">
+      <div class="err" id="auth-err"></div>
+      <button class="btn" id="send-code">Send code</button>
+    </div>
+    <div id="auth-step-code" style="display:none">
+      <h3>Enter the code</h3>
+      <p class="sub" id="code-sub"></p>
+      <label class="field" for="auth-code">6-digit code</label>
+      <input type="text" id="auth-code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
+      <div class="err" id="code-err"></div>
+      <button class="btn" id="verify-code">Verify</button>
+      <button class="btn plain" id="back-to-email">Use another email</button>
     </div>
   </div>
 </div>
 
 <!-- task sheet -->
-<div class="overlay" id="task-overlay" role="dialog" aria-modal="true" aria-label="Task">
+<div class="overlay" id="task-overlay" role="dialog" aria-modal="true" aria-label="Opportunity">
   <div class="sheet">
-    <div class="sheet-head">
-      <span class="mono" id="task-kind-label">TASK</span>
-      <button data-close="task-overlay" aria-label="Close">✕</button>
+    <div class="grabber"></div>
+    <div class="sheet-top">
+      <span class="sheet-kind" id="task-kind-label">Opportunity</span>
+      <button class="xbtn" data-close="task-overlay" aria-label="Close">✕</button>
     </div>
-    <div class="sheet-body" id="task-body"></div>
+    <div id="task-body"></div>
   </div>
 </div>
 
@@ -373,7 +395,8 @@ const sb = createClient(SUPABASE_URL, ANON_KEY);
 const AUDIO_KINDS = new Set(["audio_recording", "audio_prompted"]);
 const GATE_KEY = "tj.voice";
 const VOICE_YES = "Yes — I record or perform often";
-let ALL = [];
+let ALL = [], TASKS = [], JOBS = [];
+let filter = "all";
 
 const $ = (id) => document.getElementById(id);
 const escEl = document.createElement("span");
@@ -385,17 +408,12 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), 4200);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 3600);
 }
-function showErr(id, msg) {
-  const el = $(id);
-  el.textContent = msg;
-  el.classList.add("show");
-}
+function showErr(id, msg) { const el = $(id); el.textContent = msg; el.classList.add("show"); }
 function clearErr(id) { $(id).classList.remove("show"); }
 function open(id) { $(id).classList.add("open"); }
-// Closing the task sheet by any route must also release the microphone —
-// a hidden modal with a live recorder would keep capturing.
+// Closing the task sheet by any route must also release the microphone.
 function close(id) {
   $(id).classList.remove("open");
   if (id === "task-overlay") resetRec();
@@ -404,101 +422,198 @@ document.querySelectorAll("[data-close]").forEach((b) =>
   b.addEventListener("click", () => close(b.dataset.close)));
 document.querySelectorAll(".overlay").forEach((o) =>
   o.addEventListener("click", (e) => { if (e.target === o) close(o.id); }));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") document.querySelectorAll(".overlay.open").forEach((o) => close(o.id));
+});
 
-// ── data ─────────────────────────────────────────────────────────────────────
-function payLine(o) {
+// ── AI banner: cycle the app's AIWorkingState lines ──────────────────────────
+const AI_LINES = [
+  "Scanning every new opportunity against your profile.",
+  "Filtering out anything below your rate.",
+  "Pre-checking requirements so you only see real fits.",
+];
+let aiIdx = 0;
+if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  setInterval(() => {
+    const el = $("ai-line");
+    el.style.opacity = 0;
+    setTimeout(() => {
+      aiIdx = (aiIdx + 1) % AI_LINES.length;
+      el.textContent = AI_LINES[aiIdx];
+      el.style.opacity = 1;
+    }, 400);
+  }, 3400);
+}
+
+// ── tabs (web ships the Opportunities tab; the rest live in the iOS app) ─────
+document.querySelectorAll(".tab:not(.on)").forEach((t) =>
+  t.addEventListener("click", () => toast(t.dataset.tab + " lives in the iOS app — coming to web")));
+
+// ── data & feed ──────────────────────────────────────────────────────────────
+function payParts(o) {
   const flat = new Set(["task", "total", "fixed"]);
-  const unit = o.pay_unit && !flat.has(o.pay_unit) ? "/" + o.pay_unit : "";
+  const unit = o.pay_unit && !flat.has(o.pay_unit) ? "/" + o.pay_unit : (o.pay_unit === "task" ? "/task" : "");
   const val = o.pay_max ?? o.pay_min;
-  if (val == null) return "Pay TBD";
+  if (val == null) return { amount: "TBD", unit: "" };
   if (o.pay_min != null && o.pay_max != null && o.pay_min !== o.pay_max) {
-    return "$" + o.pay_min + "–" + o.pay_max + unit;
+    return { amount: "$" + o.pay_min + "–" + o.pay_max, unit };
   }
-  return "$" + val + unit;
+  return { amount: "$" + val, unit };
 }
-function kindCode(kind) {
-  if (kind === "audio_prompted") return "DECK";
-  if (kind === "audio_recording") return "AUD";
-  if (kind === "photo_upload") return "PHOTO";
-  return "ROLE";
+function category(o) {
+  if (o.task_kind) return "voice";
+  const req = (o.requirements ?? []).find((r) => r.type === "category");
+  return req?.value ?? "job";
 }
-function ledgerRow(o) {
-  return '<button class="row" data-id="' + esc(o.id) + '">' +
-    '<span class="row-code">' + kindCode(o.task_kind) + "</span>" +
-    '<span class="row-title">' + esc(o.title) + "</span>" +
-    '<span class="row-org">' + esc(o.org_name ?? "") + "</span>" +
-    '<span class="row-pay">' + esc(payLine(o).toUpperCase()) + "</span>" +
-    '<span class="row-time">' + esc((o.time_estimate ?? "flexible").toUpperCase()) + "</span>" +
-    '<span class="row-cta">OPEN</span>' +
-    "</button>";
+function kindLabel(o) {
+  if (o.task_kind === "photo_upload") return "Photo task";
+  if (AUDIO_KINDS.has(o.task_kind)) return "Recording";
+  const c = category(o);
+  return c === "gig" ? "Gig" : c === "study" ? "Study" : "Job";
 }
+function spotsLeft(o) {
+  if (o.max_participants == null) return null;
+  return Math.max(0, o.max_participants - (o.filled_count ?? 0));
+}
+const icons = {
+  kind: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="7" width="16" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>',
+  time: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg>',
+  globe: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14 0 18M12 3c-3 3.5-3 14 0 18"/></svg>',
+};
+function orgLetter(o) { return (o.org_name ?? "T").trim()[0]?.toUpperCase() ?? "T"; }
+
+function cardHTML(o) {
+  const p = payParts(o);
+  const left = spotsLeft(o);
+  const badge = o.task_kind && left != null
+    ? '<span class="pill-badge">' + left + " spots</span>"
+    : '<span class="pill-badge">Matched</span>';
+  const cta = o.task_kind === "photo_upload" ? "Submit" : AUDIO_KINDS.has(o.task_kind) ? "Record" : "Apply";
+  return '<button class="card" data-id="' + esc(o.id) + '">' +
+    '<div class="card-head">' +
+      '<span class="orgmark">' + esc(orgLetter(o)) + "</span>" +
+      '<span class="card-org"><b>' + esc(o.org_name ?? "Company") + "</b>" +
+      "<span>" + (o.remote === false ? "On-site" : "Remote") + "</span></span>" +
+      badge +
+    "</div>" +
+    '<div class="card-title">' + esc(o.title) + "</div>" +
+    '<div class="meta">' +
+      icons.kind + esc(kindLabel(o)) +
+      '<span class="sep">·</span>' + icons.time + esc(o.time_estimate ?? "Flexible") +
+      (o.remote === false ? "" : '<span class="sep">·</span>' + icons.globe + "Remote") +
+    "</div>" +
+    "<hr>" +
+    '<div class="pay-row"><span class="pay">' + esc(p.amount) + "</span>" +
+    '<span class="pay-unit">' + esc(p.unit) + "</span>" +
+    '<span class="apply">' + cta + "</span></div>" +
+  "</button>";
+}
+
+function voiceUnlocked() { return localStorage.getItem(GATE_KEY) === "yes"; }
+
+const CHIPS = [
+  { key: "all", label: "All" },
+  { key: "gig", label: "Gigs" },
+  { key: "study", label: "Studies" },
+  { key: "job", label: "Jobs" },
+  { key: "voice", label: "Voice" },
+];
+
+function renderChips() {
+  $("chips").innerHTML = CHIPS
+    .filter((c) => c.key !== "voice" || voiceUnlocked())
+    .map((c) => '<button class="chip' + (filter === c.key ? " on" : "") + '" data-f="' + c.key + '">' + c.label + "</button>")
+    .join("");
+  document.querySelectorAll(".chip").forEach((c) =>
+    c.addEventListener("click", () => { filter = c.dataset.f; renderChips(); renderFeed(); }));
+}
+
+function renderGate() {
+  const v = localStorage.getItem(GATE_KEY);
+  $("gate-banner").style.display = v ? "none" : "flex";
+  const note = $("voice-note");
+  if (v === "yes") {
+    note.style.display = "block";
+    note.innerHTML = 'Voice tasks unlocked ✓ · <button id="gate-change">Change</button>';
+  } else if (v === "no") {
+    note.style.display = "block";
+    note.innerHTML = 'Voice tasks hidden · <button id="gate-change">I do voice work</button>';
+  } else {
+    note.style.display = "none";
+  }
+  document.getElementById("gate-change")?.addEventListener("click", () => {
+    localStorage.removeItem(GATE_KEY);
+    if (filter === "voice") filter = "all";
+    renderGate(); renderChips(); renderFeed();
+  });
+}
+document.querySelectorAll("[data-gate]").forEach((b) =>
+  b.addEventListener("click", async () => {
+    localStorage.setItem(GATE_KEY, b.dataset.gate);
+    renderGate(); renderChips(); renderFeed();
+    if (b.dataset.gate === "yes") { toast("Paid voice tasks unlocked"); await syncVoiceAnswer(); }
+  }));
+
+function visibleOpps() {
+  const base = voiceUnlocked() ? ALL : JOBS;
+  if (filter === "all") return base;
+  return base.filter((o) => category(o) === filter);
+}
+
+function renderFeed() {
+  const items = visibleOpps();
+  $("count").textContent = items.length === 1
+    ? "1 opportunity for you"
+    : items.length + " opportunities for you";
+  $("feed").innerHTML = items.length
+    ? items.map(cardHTML).join("")
+    : '<div class="empty">Nothing here yet — your AI keeps looking.</div>';
+  document.querySelectorAll(".card").forEach((card) =>
+    card.addEventListener("click", () => {
+      const opp = ALL.find((o) => o.id === card.dataset.id);
+      if (opp) { resetRec(); openTask(opp); }
+    }));
+}
+
 async function loadData() {
   try {
     const res = await fetch(API);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    ALL = [...data.tasks, ...data.jobs];
-    $("task-ledger").innerHTML = data.tasks.length
-      ? data.tasks.map(ledgerRow).join("")
-      : '<div class="ledger-empty">No live tasks right now — check back soon.</div>';
-    $("job-ledger").innerHTML = data.jobs.length
-      ? data.jobs.map(ledgerRow).join("")
-      : '<div class="ledger-empty">No open roles right now.</div>';
-    $("stat-count").textContent = ALL.length;
-    $("stat-top").textContent = "$" + Math.max(0, ...ALL.map((o) => o.pay_max ?? o.pay_min ?? 0));
-    $("tape").innerHTML = [...new Set(
-      [...data.jobs, ...data.tasks].map((t) => t.title.split("—")[0].trim().toUpperCase()).filter(Boolean),
-    )].slice(0, 12).map((t) => "<span>" + esc(t) + " ·</span>").join(" ");
-    document.querySelectorAll(".row").forEach((row) =>
-      row.addEventListener("click", () => {
-        const opp = ALL.find((o) => o.id === row.dataset.id);
-        if (opp) { resetRec(); openTask(opp); }
-      }));
+    TASKS = data.tasks; JOBS = data.jobs; ALL = [...TASKS, ...JOBS];
+    renderFeed();
   } catch (e) {
-    $("task-ledger").innerHTML = $("job-ledger").innerHTML =
-      '<div class="ledger-empty">The ledger didn\'t load — refresh to try again.</div>';
+    $("feed").innerHTML = '<div class="empty">The feed didn\'t load — pull to refresh or try again.</div>';
   }
 }
-
-// ── voice gate ───────────────────────────────────────────────────────────────
-function applyGate() {
-  const v = localStorage.getItem(GATE_KEY);
-  $("tasks-section").classList.toggle("locked", v !== "yes");
-  $("gate-buttons").style.display = v ? "none" : "flex";
-  $("gate-answered").style.display = v ? "flex" : "none";
-  $("gate-verdict").textContent =
-    v === "yes" ? "VOICE-READY ✓ — PAID TASKS UNLOCKED" : v === "no" ? "NO VOICE WORK — TASKS HIDDEN" : "";
-}
-document.querySelectorAll("[data-gate]").forEach((b) =>
-  b.addEventListener("click", async () => {
-    localStorage.setItem(GATE_KEY, b.dataset.gate);
-    applyGate();
-    if (b.dataset.gate === "yes") {
-      $("tasks-section").scrollIntoView({ block: "start" });
-      await syncVoiceAnswer();
-    }
-  }));
-$("gate-undo").addEventListener("click", () => {
-  localStorage.removeItem(GATE_KEY);
-  applyGate();
-});
-applyGate();
 
 // ── auth ─────────────────────────────────────────────────────────────────────
 let session = null;
 async function refreshSession() {
   const { data } = await sb.auth.getSession();
   session = data.session;
-  $("session-chip").textContent = session ? session.user.email.toUpperCase() : "SIGN IN";
+  $("avatar").textContent = session ? session.user.email[0].toUpperCase() : "👤";
+  if (session) refreshBalance();
 }
-$("session-chip").addEventListener("click", async () => {
+async function refreshBalance() {
+  try {
+    const { data } = await sb.from("payouts").select("amount_cents, status");
+    const cents = (data ?? []).reduce((s, r) => s + (r.status === "paid" ? r.amount_cents : 0), 0);
+    $("balance").textContent = "$" + (cents / 100).toFixed(2);
+  } catch { /* leave $0.00 */ }
+}
+$("avatar").addEventListener("click", onProfileTap);
+$("balance").addEventListener("click", onProfileTap);
+async function onProfileTap() {
   if (!session) { open("auth-overlay"); return; }
-  if (confirm("Sign out?")) {
+  if (confirm("Signed in as " + session.user.email + ". Sign out?")) {
     await sb.auth.signOut();
-    await refreshSession();
-    toast("SIGNED OUT");
+    session = null;
+    $("avatar").textContent = "👤";
+    $("balance").textContent = "$0.00";
+    toast("Signed out");
   }
-});
+}
 
 let pendingAfterAuth = null;
 function requireAuth(then) {
@@ -543,14 +658,14 @@ $("verify-code").addEventListener("click", async () => {
   if (error) { showErr("code-err", "That code didn't work. Check it and try again."); return; }
   await refreshSession();
   close("auth-overlay");
-  toast("SIGNED IN");
+  toast("Signed in");
   await ensureProfile();
   if (pendingAfterAuth) { const fn = pendingAfterAuth; pendingAfterAuth = null; fn(); }
 });
 
 // Fresh signups have role null (the app would show role-select); this is the
-// worker-side marketplace, so pick freelancer. Also mirror the voice gate into
-// the onboarding draft so the iOS app agrees.
+// worker-side app, so pick freelancer. Mirror the voice gate into the
+// onboarding draft so the iOS app agrees.
 async function ensureProfile() {
   if (!session) return;
   const { data: prof } = await sb.from("profiles")
@@ -559,7 +674,7 @@ async function ensureProfile() {
   const patch = {};
   if (!prof.role) patch.role = "freelancer";
   const draft = prof.draft ?? {};
-  if (localStorage.getItem(GATE_KEY) === "yes" && !draft.voiceComfort) {
+  if (voiceUnlocked() && !draft.voiceComfort) {
     patch.draft = { ...draft, voiceComfort: { value: VOICE_YES, source: "user" } };
   }
   if (Object.keys(patch).length) {
@@ -646,18 +761,47 @@ function pickMime() {
   return candidates.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) ?? "";
 }
 
+function successHTML(opp) {
+  const p = payParts(opp);
+  return '<p style="margin-top:14px;text-align:center;font-size:15px"><b>Submitted.</b> We review every take — approved work pays ' +
+    esc(p.amount + p.unit) + " straight to your Stripe account.</p>" +
+    '<button class="btn ghost" id="payout-btn">Set up payouts (Stripe)</button>';
+}
+function wirePayoutBtn() {
+  $("payout-btn")?.addEventListener("click", async () => {
+    try {
+      const res = await fetch(API + "?onboard=1", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + session.access_token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ returnUrl: location.href, refreshUrl: location.href }),
+      });
+      const data = await res.json();
+      if (data?.url) location.href = data.url;
+      else throw new Error(data?.error ?? "no url");
+    } catch (e) { toast("Payout setup failed — try again later"); }
+  });
+}
+
 function openTask(opp) {
   const isTask = AUDIO_KINDS.has(opp.task_kind) || opp.task_kind === "photo_upload";
-  $("task-kind-label").textContent = isTask
-    ? (opp.task_kind === "photo_upload" ? "PHOTO TASK" : "RECORDING TASK")
-    : "OPEN ROLE";
+  $("task-kind-label").textContent = kindLabel(opp);
   const body = $("task-body");
   body.innerHTML = "";
+  const p = payParts(opp);
+  const left = spotsLeft(opp);
+
   const h = document.createElement("div");
   h.innerHTML =
     '<h3></h3><p class="sub"></p>' +
-    '<p style="margin-top:14px;font-family:var(--mono);font-size:12px;letter-spacing:.06em">' +
-    esc(payLine(opp).toUpperCase()) + " · " + esc((opp.time_estimate ?? "flexible").toUpperCase()) + "</p>" +
+    '<div class="statcard">' +
+      "<div><label>Pay</label><b class=\"green\">" + esc(p.amount) + "</b></div>" +
+      "<div><label>Time</label><b>" + esc(opp.time_estimate ?? "Flexible") + "</b></div>" +
+      "<div><label>" + (left != null ? "Spots" : "Where") + "</label><b>" +
+        (left != null ? left : (opp.remote === false ? "On-site" : "Remote")) + "</b></div>" +
+    "</div>" +
     '<div class="err" id="task-err"></div>' +
     '<div id="task-stage"></div>';
   h.querySelector("h3").textContent = opp.title;
@@ -667,14 +811,14 @@ function openTask(opp) {
 
   const stage = $("task-stage");
   if (!isTask) {
-    stage.innerHTML = '<div class="actions"><button class="pill" id="apply-btn">Apply</button></div>';
+    stage.innerHTML = '<button class="btn" id="apply-btn">Apply</button>';
     $("apply-btn").addEventListener("click", () =>
       requireAuth(async () => {
         try {
           const { data, error } = await sb.rpc("opt_in_to_opportunity", { p_opportunity_id: opp.id });
           if (error) throw new Error(error.message);
-          if (data?.ok) toast("APPLIED — WE'LL BE IN TOUCH");
-          else if (data?.reason === "already_applied") toast("ALREADY APPLIED");
+          if (data?.ok) toast("Applied — we'll be in touch");
+          else if (data?.reason === "already_applied") toast("Already applied");
           else throw new Error(data?.reason ?? "unknown");
           close("task-overlay");
         } catch (e) { showErr("task-err", e.message); }
@@ -684,9 +828,8 @@ function openTask(opp) {
 
   if (opp.task_kind === "photo_upload") {
     stage.innerHTML =
-      '<div class="actions">' +
       '<input type="file" id="photo-input" accept="image/*" style="display:none">' +
-      '<button class="pill" id="photo-btn">Choose photo & submit</button></div>';
+      '<button class="btn" id="photo-btn">Choose photo & submit</button>';
     $("photo-btn").addEventListener("click", () => requireAuth(() => $("photo-input").click()));
     $("photo-input").addEventListener("change", async (e) => {
       const file = e.target.files?.[0];
@@ -699,7 +842,7 @@ function openTask(opp) {
           throw new Error("Already submitted — it's under review.");
         }
         await submitCapture(opp, app, file, 0, null, true);
-        stage.innerHTML = '<p style="margin-top:18px"><strong>Submitted.</strong> We review every take — approved work pays ' + esc(payLine(opp)) + " straight to your Stripe account.</p>" + payoutNudge();
+        stage.innerHTML = successHTML(opp);
         wirePayoutBtn();
       } catch (err) {
         showErr("task-err", err.message);
@@ -720,18 +863,17 @@ function openTask(opp) {
     '<div class="rec-wrap">' +
     '<div class="rec-badge" id="rec-badge"><span class="rec-dot"></span><span id="rec-label">REC</span></div>' +
     '<div class="timer" id="rec-timer">00:00</div>' +
-    '<div class="timer-sub" id="rec-target">' + (target ? "TARGET " + clock(target) : "NO MINIMUM") + "</div>" +
+    '<div class="timer-sub" id="rec-target">' + (target ? "Target " + clock(target) : "No minimum") + "</div>" +
     '<div class="prompt-card" id="prompt-card">' +
     '<div class="prompt-counter" id="prompt-counter"></div>' +
     '<img id="prompt-img" alt="" style="display:none">' +
     '<div class="prompt-text" id="prompt-text"></div>' +
     '<div class="prompt-hint">Read it naturally — twice if you like.</div>' +
-    '<div class="actions" style="justify-content:center"><button class="pill" id="prompt-next">Next →</button></div>' +
+    '<button class="btn plain" id="prompt-next" style="margin-top:14px">Next →</button>' +
     "</div>" +
     '<div id="review-slot"></div>' +
     "</div>" +
-    '<div class="actions" id="rec-actions" style="justify-content:center">' +
-    '<button class="pill" id="rec-start">Start recording</button></div>';
+    '<div id="rec-actions"><button class="btn" id="rec-start">Start recording</button></div>';
 
   let promptIndex = 0;
   const promptTimings = [];
@@ -741,17 +883,17 @@ function openTask(opp) {
     if (!prompts) return;
     $("prompt-card").classList.add("on");
     if (promptIndex >= prompts.length) {
-      $("prompt-counter").textContent = "DECK DONE";
+      $("prompt-counter").textContent = "Deck done";
       $("prompt-text").textContent = "That's every card — hit Finish when you're ready.";
       $("prompt-img").style.display = "none";
       $("prompt-next").style.display = "none";
       return;
     }
-    const p = prompts[promptIndex];
+    const pr = prompts[promptIndex];
     $("prompt-counter").textContent = (promptIndex + 1) + " / " + prompts.length;
-    $("prompt-text").textContent = p.question;
+    $("prompt-text").textContent = pr.question;
     const img = $("prompt-img");
-    if (p.image_url) { img.src = p.image_url; img.style.display = "block"; }
+    if (pr.image_url) { img.src = pr.image_url; img.style.display = "block"; }
     else img.style.display = "none";
   }
 
@@ -779,8 +921,8 @@ function openTask(opp) {
         $("rec-badge").classList.add("on");
         renderPrompt();
         $("rec-actions").innerHTML =
-          '<button class="pill" id="rec-finish" disabled>Finish</button>' +
-          '<button class="pill ghost" id="rec-pause">Pause</button>';
+          '<button class="btn" id="rec-finish" disabled>Finish</button>' +
+          '<button class="btn plain" id="rec-pause">Pause</button>';
         $("rec-finish").addEventListener("click", finish);
         $("rec-pause").addEventListener("click", togglePause);
       } catch (e) {
@@ -825,11 +967,11 @@ function openTask(opp) {
       $("rec-badge").classList.remove("on");
       $("prompt-card").classList.remove("on");
       $("review-slot").innerHTML =
-        '<p style="margin-top:14px"><strong>' + clock(seconds) + "</strong> recorded — listen back, then submit.</p>" +
+        '<p style="margin-top:12px;font-size:15px"><b>' + clock(seconds) + "</b> recorded — listen back, then submit.</p>" +
         '<audio controls src="' + URL.createObjectURL(rec.blob) + '"></audio>';
       $("rec-actions").innerHTML =
-        '<button class="pill" id="rec-submit">Submit recording</button>' +
-        '<button class="pill ghost" id="rec-retake">Record again</button>';
+        '<button class="btn" id="rec-submit">Submit recording</button>' +
+        '<button class="btn plain" id="rec-retake">Record again</button>';
       $("rec-submit").addEventListener("click", async () => {
         $("rec-submit").disabled = true;
         $("rec-submit").textContent = "Uploading…";
@@ -837,10 +979,8 @@ function openTask(opp) {
           await submitCapture(opp, appRow, rec.blob, seconds, prompts ? promptTimings : null, false);
           resetRec();
           $("review-slot").innerHTML = "";
-          $("rec-timer").textContent = "DONE";
-          $("rec-actions").innerHTML = "";
-          $("task-stage").insertAdjacentHTML("beforeend",
-            '<p style="margin-top:6px;text-align:center"><strong>Submitted.</strong> We review every take — approved work pays ' + esc(payLine(opp)) + " straight to your Stripe account.</p>" + payoutNudge());
+          $("rec-timer").textContent = "Done";
+          $("rec-actions").innerHTML = successHTML(opp);
           wirePayoutBtn();
         } catch (e) {
           showErr("task-err", e.message);
@@ -856,32 +996,9 @@ function openTask(opp) {
   $("rec-start").addEventListener("click", begin);
 }
 
-function payoutNudge() {
-  return '<div class="actions" style="justify-content:center">' +
-    '<button class="pill ghost" id="payout-btn">Set up payouts (Stripe)</button></div>';
-}
-function wirePayoutBtn() {
-  $("payout-btn")?.addEventListener("click", async () => {
-    try {
-      const res = await fetch(API + "?onboard=1", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + session.access_token,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ returnUrl: location.href, refreshUrl: location.href }),
-      });
-      const data = await res.json();
-      if (data?.url) location.href = data.url;
-      else throw new Error(data?.error ?? "no url");
-    } catch (e) { toast("PAYOUT SETUP FAILED — TRY AGAIN LATER"); }
-  });
-}
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") document.querySelectorAll(".overlay.open").forEach((o) => close(o.id));
-});
-
+// ── boot ─────────────────────────────────────────────────────────────────────
+renderGate();
+renderChips();
 await refreshSession();
 if (session) await ensureProfile();
 loadData();
