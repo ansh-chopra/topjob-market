@@ -175,6 +175,9 @@ h1 .ghost { color: var(--muted); }
   display: none; align-items: flex-end; justify-content: center; z-index: 50;
 }
 .overlay.open { display: flex; }
+/* The sign-in sheet stacks over the task sheet (requireAuth opens it mid-task);
+   with equal z-index, DOM order would hide it underneath. */
+#auth-overlay { z-index: 60; }
 .sheet {
   background: var(--paper); width: 100%; max-width: 560px;
   max-height: 92vh; overflow-y: auto;
