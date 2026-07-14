@@ -1,0 +1,887 @@
+<!doctype html>
+<!--
+  Top Job web marketplace (source of truth — the deployed copy is a push away).
+
+  Hosting: GitHub Pages repo `ansh-chopra/topjob-market` (public), served at
+  https://ansh-chopra.github.io/topjob-market/. Deploy = copy this file to that
+  repo as index.html and push. It cannot live on Supabase: the gateway forces
+  text/plain + a sandbox CSP onto HTML from *.supabase.co/functions/v1
+  (anti-phishing), which also neutralized the applicants dashboard.
+
+  Data: GET functions/v1/market?json omitted (CORS-open JSON API, service-role
+  read of live opportunities). Writes: supabase-js in the browser with the
+  publishable key — same RLS paths as the iOS app (opt_in_to_opportunity RPC,
+  task-audio/task-photos uploads, task_submissions insert, profiles patch).
+  Payout onboarding proxies through POST market?onboard=1 because
+  stripe-connect has no CORS handling.
+
+  Voice gate (product rule): paid task_kind listings stay hidden until the
+  visitor says they do voice work — localStorage tj.voice, mirrored into
+  profiles.draft.voiceComfort after sign-in so the iOS app's likesVoiceWork()
+  agrees.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Top Job — Talent Marketplace</title>
+<meta name="description" content="Paid recording tasks and open roles. Consent-first, revocable, paid via Stripe.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23111214'/%3E%3Ccircle cx='16' cy='13' r='5' fill='white'/%3E%3Crect x='14.5' y='18' width='3' height='7' fill='white'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #FFFFFF;
+  --ink: #111214;
+  --grey: #55585E;
+  --muted: #9BA1AB;
+  --hairline: #E6E7EA;
+  --recessed: #F5F5F6;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --display: "Anton", "Arial Narrow", var(--body);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { animation: none !important; transition: none !important; }
+}
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+button:disabled { cursor: default; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.mono { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+
+/* ── chrome strips ── */
+.bar {
+  background: var(--ink); color: var(--paper);
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  padding: 14px 24px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+}
+.bar a { text-decoration: none; }
+.bar a:hover { text-decoration: underline; }
+.dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--paper); margin-right: 7px; vertical-align: 1px;
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: .35; } }
+
+.frame { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+/* ── hero ── */
+.hero { border-bottom: 1px solid var(--hairline); padding: 72px 0 56px; }
+.eyebrow { color: var(--grey); margin-bottom: 24px; }
+h1 {
+  font-family: var(--display); font-weight: 400;
+  font-size: clamp(52px, 9.5vw, 118px);
+  line-height: .96; letter-spacing: .01em; text-transform: uppercase;
+  max-width: 11ch;
+}
+h1 .ghost { color: var(--muted); }
+.hero p { max-width: 46ch; color: var(--grey); margin: 28px 0 32px; font-size: 17px; }
+.cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 13px 22px; border-radius: 999px;
+  background: var(--ink); color: var(--paper);
+  font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  text-decoration: none; border: 1px solid var(--ink);
+  transition: background .15s, color .15s;
+}
+.pill:hover { background: var(--paper); color: var(--ink); }
+.pill.ghost { background: var(--paper); color: var(--ink); border-color: var(--hairline); }
+.pill.ghost:hover { border-color: var(--ink); }
+.pill:disabled { opacity: .4; }
+
+/* ── tape ── */
+.tape {
+  border-bottom: 1px solid var(--hairline);
+  padding: 12px 24px; white-space: nowrap; overflow: hidden;
+  color: var(--muted);
+}
+.tape span { margin-right: 8px; }
+
+/* ── section strips ── */
+.strip {
+  display: flex; justify-content: space-between;
+  border-bottom: 1px solid var(--hairline);
+  padding: 10px 24px; color: var(--muted);
+  font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+}
+
+/* ── gate ── */
+.gate { background: var(--recessed); border-bottom: 1px solid var(--hairline); padding: 56px 0; }
+.gate h2 {
+  font-family: var(--display); font-weight: 400; text-transform: uppercase;
+  font-size: clamp(34px, 5.5vw, 64px); line-height: 1; letter-spacing: .01em;
+  margin: 18px 0 10px;
+}
+.gate p { color: var(--grey); max-width: 44ch; margin-bottom: 26px; }
+.gate-answered { display: none; align-items: center; gap: 14px; flex-wrap: wrap; }
+.gate-answered .undo { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--grey); background: none; border: 0; text-decoration: underline; cursor: pointer; }
+
+/* ── ledger ── */
+.ledger { border-bottom: 1px solid var(--hairline); }
+.row {
+  display: grid; width: 100%; text-align: left; align-items: baseline;
+  grid-template-columns: 64px 1fr minmax(0,.5fr) 100px 110px 56px;
+  gap: 16px; padding: 20px 24px;
+  border-bottom: 1px solid var(--hairline);
+  transition: background .12s, color .12s;
+}
+.row:last-child { border-bottom: 0; }
+.row:not(:disabled):hover { background: var(--ink); color: var(--paper); }
+.row:not(:disabled):hover .row-code,
+.row:not(:disabled):hover .row-org,
+.row:not(:disabled):hover .row-pay,
+.row:not(:disabled):hover .row-time { color: var(--paper); opacity: .75; }
+.row-code, .row-pay, .row-time, .row-cta { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; }
+.row-code { color: var(--muted); }
+.row-title { font-weight: 600; font-size: 16px; }
+.row-org { color: var(--muted); font-size: 13px; }
+.row-pay { color: var(--ink); }
+.row-time { color: var(--muted); }
+.row-cta { text-align: right; }
+.row:disabled .row-title { color: var(--muted); }
+.ledger-empty { padding: 32px 24px; color: var(--muted); }
+#tasks-section.locked .ledger, #tasks-section.locked .strip { display: none; }
+.locked-note { display: none; padding: 26px 24px; color: var(--grey); border-bottom: 1px solid var(--hairline); }
+#tasks-section.locked .locked-note { display: block; }
+.locked-note button { text-decoration: underline; font-weight: 600; }
+
+/* ── stats band ── */
+.band { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); border-bottom: 1px solid var(--hairline); }
+.band > div { padding: 28px 24px; border-right: 1px solid var(--hairline); }
+.band > div:last-child { border-right: 0; }
+.band strong { font-family: var(--display); font-weight: 400; font-size: 40px; line-height: 1.1; display: block; letter-spacing: .01em; }
+.band span { color: var(--muted); }
+
+/* ── modal ── */
+.overlay {
+  position: fixed; inset: 0; background: rgba(17,18,20,.5);
+  display: none; align-items: flex-end; justify-content: center; z-index: 50;
+}
+.overlay.open { display: flex; }
+.sheet {
+  background: var(--paper); width: 100%; max-width: 560px;
+  max-height: 92vh; overflow-y: auto;
+  border: 1px solid var(--hairline); border-radius: 16px 16px 0 0;
+  padding: 0 0 28px;
+}
+@media (min-width: 640px) {
+  .overlay { align-items: center; }
+  .sheet { border-radius: 16px; }
+}
+.sheet-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 20px; border-bottom: 1px solid var(--hairline);
+  position: sticky; top: 0; background: var(--paper);
+}
+.sheet-body { padding: 24px 20px 0; }
+.sheet h3 { font-size: 22px; line-height: 1.25; letter-spacing: -.01em; }
+.sheet .sub { color: var(--grey); margin-top: 6px; }
+.sheet label { display: block; margin: 18px 0 6px; font-weight: 600; font-size: 14px; }
+.sheet input[type="email"], .sheet input[type="text"] {
+  width: 100%; padding: 13px 14px; font-size: 16px;
+  border: 1px solid var(--hairline); border-radius: 10px; font-family: inherit;
+}
+.sheet input:focus { outline: 2px solid var(--ink); outline-offset: 0; border-color: var(--ink); }
+.sheet .code-input { font-family: var(--mono); letter-spacing: .35em; text-align: center; font-size: 22px; }
+.sheet .actions { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+.err { color: var(--ink); background: var(--recessed); border: 1px solid var(--hairline); border-radius: 10px; padding: 10px 12px; margin-top: 14px; font-size: 14px; display: none; }
+.err.show { display: block; }
+
+/* ── recorder ── */
+.rec-wrap { text-align: center; padding: 8px 0 4px; }
+.timer {
+  font-family: var(--mono); font-size: 56px; line-height: 1.1;
+  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+}
+.timer-sub { color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin-top: 4px; }
+.rec-badge {
+  display: none; margin: 0 auto 14px; width: fit-content;
+  align-items: center; gap: 8px; padding: 5px 14px; border-radius: 999px;
+  background: var(--recessed); font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+}
+.rec-badge.on { display: flex; }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink); animation: pulse 1.2s ease-in-out infinite; }
+.rec-badge.paused .rec-dot { animation: none; opacity: .35; }
+.prompt-card {
+  border: 1px solid var(--hairline); border-radius: 14px; padding: 20px;
+  margin: 18px 0; text-align: center; display: none;
+}
+.prompt-card.on { display: block; }
+.prompt-card img { max-width: 100%; border-radius: 10px; margin-bottom: 12px; }
+.prompt-counter { color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: .08em; margin-bottom: 10px; text-transform: uppercase; }
+.prompt-text { font-size: 24px; font-weight: 700; line-height: 1.3; }
+.prompt-hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
+audio { width: 100%; margin-top: 16px; }
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: var(--ink); color: var(--paper); padding: 12px 20px; border-radius: 999px;
+  font-family: var(--mono); font-size: 12px; letter-spacing: .06em;
+  display: none; z-index: 90; max-width: 90vw; text-align: center;
+}
+.toast.show { display: block; }
+
+@media (max-width: 720px) {
+  .row { grid-template-columns: 48px 1fr 72px; }
+  .row-org, .row-time, .row-cta { display: none; }
+  .row-pay { text-align: right; }
+  .bar { padding: 12px 16px; }
+  .frame { padding: 0 16px; }
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <span>ZERO BILLION · TOP JOB</span>
+  <span><span class="dot" aria-hidden="true"></span>MARKETPLACE · OPERATING</span>
+  <button id="session-chip" class="mono" style="color:inherit">SIGN IN</button>
+</header>
+
+<section class="hero">
+  <div class="frame">
+    <div class="eyebrow mono">FIELD NOTE 01 · THE MARKETPLACE</div>
+    <h1>Get paid for <span class="ghost">your voice.</span></h1>
+    <p>Top Job matches you with paid recording tasks and open roles.
+       Record in your browser, submit, get paid through Stripe.
+       Consent-first and revocable — always.</p>
+    <div class="cta-row">
+      <a class="pill" href="#gate">See paid tasks →</a>
+      <a class="pill ghost" href="#roles">Open roles</a>
+    </div>
+  </div>
+</section>
+
+<div class="tape mono" aria-hidden="true" id="tape"></div>
+
+<section class="gate" id="gate">
+  <div class="frame">
+    <div class="mono" style="color:var(--muted)">ACCESS · PAID TASKS</div>
+    <h2>Are you a voice actor?</h2>
+    <p>Recording tasks pay per take and need people who like mic work —
+       narration, accents, character reads, or just a clear everyday voice.</p>
+    <div class="cta-row" id="gate-buttons">
+      <button class="pill" data-gate="yes">Yes — show me paid tasks</button>
+      <button class="pill ghost" data-gate="no">Not my thing</button>
+    </div>
+    <div class="gate-answered" id="gate-answered">
+      <span class="mono" id="gate-verdict"></span>
+      <button class="undo" id="gate-undo">Change answer</button>
+    </div>
+  </div>
+</section>
+
+<section id="tasks-section" class="locked">
+  <div class="strip"><span>SEC. 01</span><span>PAID RECORDING TASKS</span></div>
+  <div class="locked-note">
+    Paid recording tasks are reserved for voice-ready profiles.
+    <button data-gate="yes">I do voice work — unlock them</button>
+  </div>
+  <div class="ledger" id="task-ledger"><div class="ledger-empty">Loading the ledger…</div></div>
+</section>
+
+<section id="roles">
+  <div class="strip"><span>SEC. 02</span><span>OPEN ROLES</span></div>
+  <div class="ledger" id="job-ledger"><div class="ledger-empty">Loading the ledger…</div></div>
+</section>
+
+<div class="band">
+  <div><strong id="stat-count">—</strong><span class="mono">LIVE LISTINGS</span></div>
+  <div><strong id="stat-top">—</strong><span class="mono">TOP RATE</span></div>
+  <div><strong>STRIPE</strong><span class="mono">PAYOUT RAILS, FROM DAY ONE</span></div>
+</div>
+
+<footer class="bar">
+  <span>CONSENT-FIRST · REVOCABLE · PAID VIA STRIPE</span>
+  <a href="https://zerobillion.ai">ZEROBILLION.AI</a>
+  <span>© 2026 ZERO BILLION AI</span>
+</footer>
+
+<!-- auth sheet -->
+<div class="overlay" id="auth-overlay" role="dialog" aria-modal="true" aria-label="Sign in">
+  <div class="sheet">
+    <div class="sheet-head">
+      <span class="mono">SIGN IN</span>
+      <button data-close="auth-overlay" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body">
+      <div id="auth-step-email">
+        <h3>Sign in with your email</h3>
+        <p class="sub">We'll send a 6-digit code. No password needed.</p>
+        <label for="auth-email">Email</label>
+        <input type="email" id="auth-email" autocomplete="email" placeholder="you@example.com">
+        <div class="err" id="auth-err"></div>
+        <div class="actions">
+          <button class="pill" id="send-code">Send code</button>
+        </div>
+      </div>
+      <div id="auth-step-code" style="display:none">
+        <h3>Enter the code</h3>
+        <p class="sub" id="code-sub"></p>
+        <label for="auth-code">6-digit code</label>
+        <input type="text" id="auth-code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
+        <div class="err" id="code-err"></div>
+        <div class="actions">
+          <button class="pill" id="verify-code">Verify</button>
+          <button class="pill ghost" id="back-to-email">Use another email</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- task sheet -->
+<div class="overlay" id="task-overlay" role="dialog" aria-modal="true" aria-label="Task">
+  <div class="sheet">
+    <div class="sheet-head">
+      <span class="mono" id="task-kind-label">TASK</span>
+      <button data-close="task-overlay" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-body" id="task-body"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const SUPABASE_URL = "https://mdudatnnwpwisynuyfgz.supabase.co";
+const ANON_KEY = "sb_publishable_qHyzYL1rTrUPZWzcTw3snQ_BY-cY0eX";
+const API = SUPABASE_URL + "/functions/v1/market";
+
+const sb = createClient(SUPABASE_URL, ANON_KEY);
+const AUDIO_KINDS = new Set(["audio_recording", "audio_prompted"]);
+const GATE_KEY = "tj.voice";
+const VOICE_YES = "Yes — I record or perform often";
+let ALL = [];
+
+const $ = (id) => document.getElementById(id);
+const escEl = document.createElement("span");
+function esc(s) { escEl.textContent = s ?? ""; return escEl.innerHTML; }
+
+let toastTimer;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 4200);
+}
+function showErr(id, msg) {
+  const el = $(id);
+  el.textContent = msg;
+  el.classList.add("show");
+}
+function clearErr(id) { $(id).classList.remove("show"); }
+function open(id) { $(id).classList.add("open"); }
+// Closing the task sheet by any route must also release the microphone —
+// a hidden modal with a live recorder would keep capturing.
+function close(id) {
+  $(id).classList.remove("open");
+  if (id === "task-overlay") resetRec();
+}
+document.querySelectorAll("[data-close]").forEach((b) =>
+  b.addEventListener("click", () => close(b.dataset.close)));
+document.querySelectorAll(".overlay").forEach((o) =>
+  o.addEventListener("click", (e) => { if (e.target === o) close(o.id); }));
+
+// ── data ─────────────────────────────────────────────────────────────────────
+function payLine(o) {
+  const flat = new Set(["task", "total", "fixed"]);
+  const unit = o.pay_unit && !flat.has(o.pay_unit) ? "/" + o.pay_unit : "";
+  const val = o.pay_max ?? o.pay_min;
+  if (val == null) return "Pay TBD";
+  if (o.pay_min != null && o.pay_max != null && o.pay_min !== o.pay_max) {
+    return "$" + o.pay_min + "–" + o.pay_max + unit;
+  }
+  return "$" + val + unit;
+}
+function kindCode(kind) {
+  if (kind === "audio_prompted") return "DECK";
+  if (kind === "audio_recording") return "AUD";
+  if (kind === "photo_upload") return "PHOTO";
+  return "ROLE";
+}
+function ledgerRow(o) {
+  return '<button class="row" data-id="' + esc(o.id) + '">' +
+    '<span class="row-code">' + kindCode(o.task_kind) + "</span>" +
+    '<span class="row-title">' + esc(o.title) + "</span>" +
+    '<span class="row-org">' + esc(o.org_name ?? "") + "</span>" +
+    '<span class="row-pay">' + esc(payLine(o).toUpperCase()) + "</span>" +
+    '<span class="row-time">' + esc((o.time_estimate ?? "flexible").toUpperCase()) + "</span>" +
+    '<span class="row-cta">OPEN</span>' +
+    "</button>";
+}
+async function loadData() {
+  try {
+    const res = await fetch(API);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    ALL = [...data.tasks, ...data.jobs];
+    $("task-ledger").innerHTML = data.tasks.length
+      ? data.tasks.map(ledgerRow).join("")
+      : '<div class="ledger-empty">No live tasks right now — check back soon.</div>';
+    $("job-ledger").innerHTML = data.jobs.length
+      ? data.jobs.map(ledgerRow).join("")
+      : '<div class="ledger-empty">No open roles right now.</div>';
+    $("stat-count").textContent = ALL.length;
+    $("stat-top").textContent = "$" + Math.max(0, ...ALL.map((o) => o.pay_max ?? o.pay_min ?? 0));
+    $("tape").innerHTML = [...new Set(
+      data.tasks.map((t) => t.title.split("—")[0].trim().toUpperCase()).filter(Boolean),
+    )].slice(0, 12).map((t) => "<span>" + esc(t) + " ·</span>").join(" ");
+    document.querySelectorAll(".row").forEach((row) =>
+      row.addEventListener("click", () => {
+        const opp = ALL.find((o) => o.id === row.dataset.id);
+        if (opp) { resetRec(); openTask(opp); }
+      }));
+  } catch (e) {
+    $("task-ledger").innerHTML = $("job-ledger").innerHTML =
+      '<div class="ledger-empty">The ledger didn\'t load — refresh to try again.</div>';
+  }
+}
+
+// ── voice gate ───────────────────────────────────────────────────────────────
+function applyGate() {
+  const v = localStorage.getItem(GATE_KEY);
+  $("tasks-section").classList.toggle("locked", v !== "yes");
+  $("gate-buttons").style.display = v ? "none" : "flex";
+  $("gate-answered").style.display = v ? "flex" : "none";
+  $("gate-verdict").textContent =
+    v === "yes" ? "VOICE-READY ✓ — PAID TASKS UNLOCKED" : v === "no" ? "NO VOICE WORK — TASKS HIDDEN" : "";
+}
+document.querySelectorAll("[data-gate]").forEach((b) =>
+  b.addEventListener("click", async () => {
+    localStorage.setItem(GATE_KEY, b.dataset.gate);
+    applyGate();
+    if (b.dataset.gate === "yes") {
+      $("tasks-section").scrollIntoView({ block: "start" });
+      await syncVoiceAnswer();
+    }
+  }));
+$("gate-undo").addEventListener("click", () => {
+  localStorage.removeItem(GATE_KEY);
+  applyGate();
+});
+applyGate();
+
+// ── auth ─────────────────────────────────────────────────────────────────────
+let session = null;
+async function refreshSession() {
+  const { data } = await sb.auth.getSession();
+  session = data.session;
+  $("session-chip").textContent = session ? session.user.email.toUpperCase() : "SIGN IN";
+}
+$("session-chip").addEventListener("click", async () => {
+  if (!session) { open("auth-overlay"); return; }
+  if (confirm("Sign out?")) {
+    await sb.auth.signOut();
+    await refreshSession();
+    toast("SIGNED OUT");
+  }
+});
+
+let pendingAfterAuth = null;
+function requireAuth(then) {
+  if (session) { then(); return; }
+  pendingAfterAuth = then;
+  open("auth-overlay");
+}
+
+$("send-code").addEventListener("click", async () => {
+  clearErr("auth-err");
+  const email = $("auth-email").value.trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) { showErr("auth-err", "Enter a valid email address."); return; }
+  $("send-code").disabled = true;
+  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+  $("send-code").disabled = false;
+  if (error) {
+    const rate = /rate limit/i.test(error.message);
+    showErr("auth-err", rate
+      ? "Email sign-in is briefly rate-limited. Wait a few minutes and try again."
+      : error.message);
+    return;
+  }
+  $("code-sub").textContent = "Sent to " + email + ". It can take a minute.";
+  $("auth-step-email").style.display = "none";
+  $("auth-step-code").style.display = "block";
+  $("auth-code").focus();
+});
+
+$("back-to-email").addEventListener("click", () => {
+  $("auth-step-code").style.display = "none";
+  $("auth-step-email").style.display = "block";
+});
+
+$("verify-code").addEventListener("click", async () => {
+  clearErr("code-err");
+  const email = $("auth-email").value.trim();
+  const token = $("auth-code").value.trim();
+  if (token.length !== 6) { showErr("code-err", "The code is 6 digits."); return; }
+  $("verify-code").disabled = true;
+  const { error } = await sb.auth.verifyOtp({ email, token, type: "email" });
+  $("verify-code").disabled = false;
+  if (error) { showErr("code-err", "That code didn't work. Check it and try again."); return; }
+  await refreshSession();
+  close("auth-overlay");
+  toast("SIGNED IN");
+  await ensureProfile();
+  if (pendingAfterAuth) { const fn = pendingAfterAuth; pendingAfterAuth = null; fn(); }
+});
+
+// Fresh signups have role null (the app would show role-select); this is the
+// worker-side marketplace, so pick freelancer. Also mirror the voice gate into
+// the onboarding draft so the iOS app agrees.
+async function ensureProfile() {
+  if (!session) return;
+  const { data: prof } = await sb.from("profiles")
+    .select("role, draft").eq("id", session.user.id).maybeSingle();
+  if (!prof) return;
+  const patch = {};
+  if (!prof.role) patch.role = "freelancer";
+  const draft = prof.draft ?? {};
+  if (localStorage.getItem(GATE_KEY) === "yes" && !draft.voiceComfort) {
+    patch.draft = { ...draft, voiceComfort: { value: VOICE_YES, source: "user" } };
+  }
+  if (Object.keys(patch).length) {
+    await sb.from("profiles").update(patch).eq("id", session.user.id);
+  }
+}
+async function syncVoiceAnswer() { if (session) await ensureProfile(); }
+
+// ── task/application plumbing (mirrors src/features/tasks/api.ts) ───────────
+function parseTargetSeconds(estimate) {
+  const m = /(\d+)\s*(hr|hour|min)/i.exec(estimate ?? "");
+  if (!m) return null;
+  const n = Number(m[1]);
+  return m[2].toLowerCase().startsWith("h") ? n * 3600 : n * 60;
+}
+function minimumSeconds(target) { return target ? Math.ceil(target * 0.92) : 1; }
+function clock(total) {
+  const s = Math.max(0, Math.floor(total));
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  const h = Math.floor(s / 3600);
+  return h > 0 ? h + ":" + mm + ":" + ss : mm + ":" + ss;
+}
+
+async function startTask(opp) {
+  const { data, error } = await sb.rpc("opt_in_to_opportunity", { p_opportunity_id: opp.id });
+  if (error) throw new Error(error.message);
+  if (!data?.ok && data?.reason !== "already_applied") {
+    throw new Error("Couldn't claim a spot (" + (data?.reason ?? "unknown") + ").");
+  }
+  const { data: app, error: fetchErr } = await sb.from("applications")
+    .select("id, status, timeline")
+    .eq("user_id", session.user.id).eq("opportunity_id", opp.id).maybeSingle();
+  if (fetchErr) throw new Error(fetchErr.message);
+  if (!app) throw new Error("Application not found after opt-in.");
+  if (app.status === "applied") {
+    const timeline = [...(app.timeline ?? []), { status: "accepted", at: new Date().toISOString() }];
+    const { error: updErr } = await sb.from("applications")
+      .update({ status: "accepted", timeline }).eq("id", app.id);
+    if (updErr) throw new Error(updErr.message);
+    app.status = "accepted"; app.timeline = timeline;
+  }
+  return app;
+}
+
+async function submitCapture(opp, app, blob, durationSeconds, promptTimings, isPhoto) {
+  const uid = session.user.id;
+  const bucket = isPhoto ? "task-photos" : "task-audio";
+  const path = uid + "/" + app.id + (isPhoto ? ".jpg" : ".m4a");
+  const { error: upErr } = await sb.storage.from(bucket)
+    .upload(path, blob, { contentType: blob.type || (isPhoto ? "image/jpeg" : "audio/mp4"), upsert: true });
+  if (upErr) throw new Error(upErr.message);
+  const row = {
+    application_id: app.id, user_id: uid, opportunity_id: opp.id,
+    storage_path: path, duration_seconds: Math.round(durationSeconds),
+    mime: blob.type || (isPhoto ? "image/jpeg" : "audio/mp4"),
+  };
+  if (promptTimings?.length) row.prompt_timings = promptTimings;
+  const { error: insErr } = await sb.from("task_submissions").insert(row);
+  if (insErr && insErr.code !== "23505") throw new Error(insErr.message);
+  const timeline = [...(app.timeline ?? []), { status: "completed", at: new Date().toISOString() }];
+  const { error: updErr } = await sb.from("applications")
+    .update({ status: "completed", timeline }).eq("id", app.id);
+  if (updErr) throw new Error(updErr.message);
+}
+
+// ── recorder ─────────────────────────────────────────────────────────────────
+let rec = { media: null, recorder: null, chunks: [], startedAt: 0, pausedMs: 0, pauseStart: 0, timer: null, blob: null };
+
+function resetRec() {
+  if (rec.timer) clearInterval(rec.timer);
+  if (rec.media) rec.media.getTracks().forEach((t) => t.stop());
+  rec = { media: null, recorder: null, chunks: [], startedAt: 0, pausedMs: 0, pauseStart: 0, timer: null, blob: null };
+}
+
+function elapsedSeconds() {
+  if (!rec.startedAt) return 0;
+  const pausedNow = rec.pauseStart ? Date.now() - rec.pauseStart : 0;
+  return (Date.now() - rec.startedAt - rec.pausedMs - pausedNow) / 1000;
+}
+
+function pickMime() {
+  const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
+  return candidates.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) ?? "";
+}
+
+function openTask(opp) {
+  const isTask = AUDIO_KINDS.has(opp.task_kind) || opp.task_kind === "photo_upload";
+  $("task-kind-label").textContent = isTask
+    ? (opp.task_kind === "photo_upload" ? "PHOTO TASK" : "RECORDING TASK")
+    : "OPEN ROLE";
+  const body = $("task-body");
+  body.innerHTML = "";
+  const h = document.createElement("div");
+  h.innerHTML =
+    '<h3></h3><p class="sub"></p>' +
+    '<p style="margin-top:14px;font-family:var(--mono);font-size:12px;letter-spacing:.06em">' +
+    esc(payLine(opp).toUpperCase()) + " · " + esc((opp.time_estimate ?? "flexible").toUpperCase()) + "</p>" +
+    '<div class="err" id="task-err"></div>' +
+    '<div id="task-stage"></div>';
+  h.querySelector("h3").textContent = opp.title;
+  h.querySelector(".sub").textContent = opp.description ?? (opp.org_name ?? "");
+  body.appendChild(h);
+  open("task-overlay");
+
+  const stage = $("task-stage");
+  if (!isTask) {
+    stage.innerHTML = '<div class="actions"><button class="pill" id="apply-btn">Apply</button></div>';
+    $("apply-btn").addEventListener("click", () =>
+      requireAuth(async () => {
+        try {
+          const { data, error } = await sb.rpc("opt_in_to_opportunity", { p_opportunity_id: opp.id });
+          if (error) throw new Error(error.message);
+          if (data?.ok) toast("APPLIED — WE'LL BE IN TOUCH");
+          else if (data?.reason === "already_applied") toast("ALREADY APPLIED");
+          else throw new Error(data?.reason ?? "unknown");
+          close("task-overlay");
+        } catch (e) { showErr("task-err", e.message); }
+      }));
+    return;
+  }
+
+  if (opp.task_kind === "photo_upload") {
+    stage.innerHTML =
+      '<div class="actions">' +
+      '<input type="file" id="photo-input" accept="image/*" style="display:none">' +
+      '<button class="pill" id="photo-btn">Choose photo & submit</button></div>';
+    $("photo-btn").addEventListener("click", () => requireAuth(() => $("photo-input").click()));
+    $("photo-input").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      $("photo-btn").disabled = true;
+      $("photo-btn").textContent = "Uploading…";
+      try {
+        const app = await startTask(opp);
+        if (app.status !== "accepted" && app.status !== "applied") {
+          throw new Error("Already submitted — it's under review.");
+        }
+        await submitCapture(opp, app, file, 0, null, true);
+        stage.innerHTML = '<p style="margin-top:18px"><strong>Submitted.</strong> We review every take — approved work pays ' + esc(payLine(opp)) + " straight to your Stripe account.</p>" + payoutNudge();
+        wirePayoutBtn();
+      } catch (err) {
+        showErr("task-err", err.message);
+        $("photo-btn").disabled = false;
+        $("photo-btn").textContent = "Choose photo & submit";
+      }
+    });
+    return;
+  }
+
+  // audio task
+  const prompts = opp.task_kind === "audio_prompted" && opp.screening_questions?.length
+    ? opp.screening_questions : null;
+  const target = parseTargetSeconds(opp.time_estimate);
+  const minSec = minimumSeconds(target);
+
+  stage.innerHTML =
+    '<div class="rec-wrap">' +
+    '<div class="rec-badge" id="rec-badge"><span class="rec-dot"></span><span id="rec-label">REC</span></div>' +
+    '<div class="timer" id="rec-timer">00:00</div>' +
+    '<div class="timer-sub" id="rec-target">' + (target ? "TARGET " + clock(target) : "NO MINIMUM") + "</div>" +
+    '<div class="prompt-card" id="prompt-card">' +
+    '<div class="prompt-counter" id="prompt-counter"></div>' +
+    '<img id="prompt-img" alt="" style="display:none">' +
+    '<div class="prompt-text" id="prompt-text"></div>' +
+    '<div class="prompt-hint">Read it naturally — twice if you like.</div>' +
+    '<div class="actions" style="justify-content:center"><button class="pill" id="prompt-next">Next →</button></div>' +
+    "</div>" +
+    '<div id="review-slot"></div>' +
+    "</div>" +
+    '<div class="actions" id="rec-actions" style="justify-content:center">' +
+    '<button class="pill" id="rec-start">Start recording</button></div>';
+
+  let promptIndex = 0;
+  const promptTimings = [];
+  let appRow = null;
+
+  function renderPrompt() {
+    if (!prompts) return;
+    $("prompt-card").classList.add("on");
+    if (promptIndex >= prompts.length) {
+      $("prompt-counter").textContent = "DECK DONE";
+      $("prompt-text").textContent = "That's every card — hit Finish when you're ready.";
+      $("prompt-img").style.display = "none";
+      $("prompt-next").style.display = "none";
+      return;
+    }
+    const p = prompts[promptIndex];
+    $("prompt-counter").textContent = (promptIndex + 1) + " / " + prompts.length;
+    $("prompt-text").textContent = p.question;
+    const img = $("prompt-img");
+    if (p.image_url) { img.src = p.image_url; img.style.display = "block"; }
+    else img.style.display = "none";
+  }
+
+  function updateTimer() {
+    const el = elapsedSeconds();
+    $("rec-timer").textContent = clock(el);
+    const deckDone = !prompts || promptIndex >= prompts.length;
+    const finish = $("rec-finish");
+    if (finish) finish.disabled = !(el >= minSec && deckDone);
+  }
+
+  function begin() {
+    requireAuth(async () => {
+      try {
+        appRow = await startTask(opp);
+        if (appRow.status !== "accepted") throw new Error("Already submitted — it's under review.");
+        const mime = pickMime();
+        rec.media = await navigator.mediaDevices.getUserMedia({ audio: true });
+        rec.recorder = new MediaRecorder(rec.media, mime ? { mimeType: mime, audioBitsPerSecond: 64000 } : undefined);
+        rec.chunks = [];
+        rec.recorder.ondataavailable = (e) => { if (e.data.size) rec.chunks.push(e.data); };
+        rec.recorder.start(1000);
+        rec.startedAt = Date.now();
+        rec.timer = setInterval(updateTimer, 250);
+        $("rec-badge").classList.add("on");
+        renderPrompt();
+        $("rec-actions").innerHTML =
+          '<button class="pill" id="rec-finish" disabled>Finish</button>' +
+          '<button class="pill ghost" id="rec-pause">Pause</button>';
+        $("rec-finish").addEventListener("click", finish);
+        $("rec-pause").addEventListener("click", togglePause);
+      } catch (e) {
+        showErr("task-err", e.name === "NotAllowedError"
+          ? "Microphone access was blocked. Allow it in your browser and try again."
+          : e.message);
+      }
+    });
+  }
+
+  function togglePause() {
+    const badge = $("rec-badge");
+    if (rec.recorder.state === "recording") {
+      rec.recorder.pause();
+      rec.pauseStart = Date.now();
+      badge.classList.add("paused");
+      $("rec-label").textContent = "PAUSED";
+      $("rec-pause").textContent = "Resume";
+    } else if (rec.recorder.state === "paused") {
+      rec.recorder.resume();
+      rec.pausedMs += Date.now() - rec.pauseStart;
+      rec.pauseStart = 0;
+      badge.classList.remove("paused");
+      $("rec-label").textContent = "REC";
+      $("rec-pause").textContent = "Pause";
+    }
+  }
+
+  $("prompt-next").addEventListener("click", () => {
+    if (!prompts || promptIndex >= prompts.length) return;
+    promptTimings.push({ index: promptIndex, atMillis: Math.round(elapsedSeconds() * 1000) });
+    promptIndex += 1;
+    renderPrompt();
+  });
+
+  function finish() {
+    const seconds = elapsedSeconds();
+    rec.recorder.onstop = () => {
+      rec.blob = new Blob(rec.chunks, { type: rec.recorder.mimeType || "audio/webm" });
+      rec.media.getTracks().forEach((t) => t.stop());
+      clearInterval(rec.timer);
+      $("rec-badge").classList.remove("on");
+      $("prompt-card").classList.remove("on");
+      $("review-slot").innerHTML =
+        '<p style="margin-top:14px"><strong>' + clock(seconds) + "</strong> recorded — listen back, then submit.</p>" +
+        '<audio controls src="' + URL.createObjectURL(rec.blob) + '"></audio>';
+      $("rec-actions").innerHTML =
+        '<button class="pill" id="rec-submit">Submit recording</button>' +
+        '<button class="pill ghost" id="rec-retake">Record again</button>';
+      $("rec-submit").addEventListener("click", async () => {
+        $("rec-submit").disabled = true;
+        $("rec-submit").textContent = "Uploading…";
+        try {
+          await submitCapture(opp, appRow, rec.blob, seconds, prompts ? promptTimings : null, false);
+          resetRec();
+          $("review-slot").innerHTML = "";
+          $("rec-timer").textContent = "DONE";
+          $("rec-actions").innerHTML = "";
+          $("task-stage").insertAdjacentHTML("beforeend",
+            '<p style="margin-top:6px;text-align:center"><strong>Submitted.</strong> We review every take — approved work pays ' + esc(payLine(opp)) + " straight to your Stripe account.</p>" + payoutNudge());
+          wirePayoutBtn();
+        } catch (e) {
+          showErr("task-err", e.message);
+          $("rec-submit").disabled = false;
+          $("rec-submit").textContent = "Submit recording";
+        }
+      });
+      $("rec-retake").addEventListener("click", () => { resetRec(); openTask(opp); });
+    };
+    rec.recorder.stop();
+  }
+
+  $("rec-start").addEventListener("click", begin);
+}
+
+function payoutNudge() {
+  return '<div class="actions" style="justify-content:center">' +
+    '<button class="pill ghost" id="payout-btn">Set up payouts (Stripe)</button></div>';
+}
+function wirePayoutBtn() {
+  $("payout-btn")?.addEventListener("click", async () => {
+    try {
+      const res = await fetch(API + "?onboard=1", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + session.access_token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ returnUrl: location.href, refreshUrl: location.href }),
+      });
+      const data = await res.json();
+      if (data?.url) location.href = data.url;
+      else throw new Error(data?.error ?? "no url");
+    } catch (e) { toast("PAYOUT SETUP FAILED — TRY AGAIN LATER"); }
+  });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") document.querySelectorAll(".overlay.open").forEach((o) => close(o.id));
+});
+
+await refreshSession();
+if (session) await ensureProfile();
+loadData();
+</script>
+</body>
+</html>
